@@ -176,6 +176,10 @@ export function useHealthSync(): UseHealthSyncReturn {
 
       console.log('[HealthSync] Querying HealthKit data...');
       
+      // Since we're only querying running workouts, we can hardcode these values
+      const workoutType = 'running';
+      const activityType = 'running';
+
       // Get the last sync time or default to 7 days ago
       const now = new Date();
       const lastSync = forceSync 
@@ -186,12 +190,14 @@ export function useHealthSync(): UseHealthSyncReturn {
       
       console.log('[HealthSync] Querying data from:', lastSync.toISOString());
       
-      // Query HealthKit for distance data
+      // Query HealthKit for running workouts only
       const response = await CapacitorHealthkit.queryHKitSampleType({
-        sampleName: SampleNames.DISTANCE_WALKING_RUNNING,
+        sampleName: SampleNames.WORKOUT_TYPE,
         startDate: lastSync.toISOString(),
         endDate: now.toISOString(),
         limit: 10000, // Adjust based on expected data volume
+        // Filter for running workouts only
+        predicate: 'workoutActivityType == 1', // 1 is the code for HKWorkoutActivityType.Running
       }) as unknown as QueryResponse<HKDistanceSample>;
 
       console.log(`[HealthSync] Found ${response?.resultData?.length || 0} samples`);
@@ -202,42 +208,69 @@ export function useHealthSync(): UseHealthSyncReturn {
         return;
       }
 
-      // Process and upload the data
-      const activities = response.resultData.map(sample => {
-        // Ensure we have valid dates
-        const startDate = new Date(sample.startDate);
-        const endDate = new Date(sample.endDate);
+      // Group activities by date (YYYY-MM-DD)
+      const activitiesByDate = new Map<string, number>();
+      
+      response.resultData.forEach(sample => {
+        try {
+          const startDate = new Date(sample.startDate);
+          if (isNaN(startDate.getTime())) {
+            console.warn('[HealthSync] Invalid date for sample:', sample);
+            return;
+          }
+          
+          const dateKey = startDate.toISOString().split('T')[0]; // YYYY-MM-DD
+          const distanceMeters = toMeters(sample.value, sample.unitName);
+          
+          // Sum distances for the same date
+          activitiesByDate.set(
+            dateKey,
+            (activitiesByDate.get(dateKey) || 0) + distanceMeters
+          );
+        } catch (error) {
+          console.error('[HealthSync] Error processing sample:', error, sample);
+        }
+      });
+      
+      // Convert to array of activities by date
+      const activities = Array.from(activitiesByDate.entries()).map(([date, distanceMeters]) => ({
+        user_id: user.id,
+        activity_date: date,
+        distance_meters: Math.round(distanceMeters), // Round to nearest meter
+        source: 'HealthKit',
+        source_type: 'running_workout',
+        updated_at: new Date().toISOString()
+      }));
+
+      console.log(`[HealthSync] Uploading ${activities.length} daily activity records`);
+      
+      // Update or insert daily activity records
+      for (const activity of activities) {
+        const { data: existing, error: fetchError } = await safeSupabase
+          .from('user_activities')
+          .select('id, distance_meters')
+          .eq('user_id', activity.user_id)
+          .eq('activity_date', activity.activity_date)
+          .single();
         
-        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-          console.warn('[HealthSync] Invalid date range for sample:', sample);
-          return null;
+        if (fetchError && fetchError.code !== 'PGRST116') { // Ignore 'not found' error
+          console.error('[HealthSync] Error checking for existing activity:', fetchError);
+          continue;
         }
         
-        return {
-          user_id: user.id,
-          activity_type: 'walking',
-          distance_meters: toMeters(sample.value, sample.unitName),
-          start_time: startDate.toISOString(),
-          end_time: endDate.toISOString(),
-          source: sample.source || 'HealthKit',
-          source_id: sample.uuid || `${startDate.getTime()}-${endDate.getTime()}`,
-          metadata: {
-            device: sample.device,
-            source_bundle_id: sample.sourceBundleId,
-          },
-        };
-      }).filter(Boolean); // Filter out any invalid entries
-
-      console.log(`[HealthSync] Uploading ${activities.length} activities`);
-      
-      // Upload to your backend
-      const { error } = await safeSupabase
-        .from('activities')
-        .upsert(activities, { onConflict: 'user_id,source_id' });
-
-      if (error) {
-        throw new Error(`Failed to save activities: ${error.message}`);
-      }
+        // Only update if the new distance is greater than existing
+        if (existing && existing.distance_meters >= activity.distance_meters) {
+          console.log(`[HealthSync] Skipping update for ${activity.activity_date} - existing distance is greater or equal`);
+          continue;
+        }
+        
+        const { error } = await safeSupabase
+          .from('user_activities')
+          .upsert(activity, { onConflict: 'user_id,activity_date' });
+          
+        if (error) {
+          console.error(`[HealthSync] Error saving activity for ${activity.activity_date}:`, error);
+        }
 
       // Update last sync time
       lastSyncRef.current = now;
