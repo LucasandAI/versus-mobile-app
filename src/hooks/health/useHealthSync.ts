@@ -48,6 +48,7 @@ interface HKDistanceSample {
   sourceBundleId: string;
   device: HKDeviceInfo | null;
   duration?: number;
+  workoutActivityType?: number;
 }
 
 interface HealthKitQueryResult<T> {
@@ -190,15 +191,20 @@ export function useHealthSync(): UseHealthSyncReturn {
       
       console.log('[HealthSync] Querying data from:', lastSync.toISOString());
       
-      // Query HealthKit for running workouts only
+      // Query HealthKit for running workouts
       const response = await CapacitorHealthkit.queryHKitSampleType({
         sampleName: SampleNames.WORKOUT_TYPE,
         startDate: lastSync.toISOString(),
         endDate: now.toISOString(),
-        limit: 10000, // Adjust based on expected data volume
-        // Filter for running workouts only
-        predicate: 'workoutActivityType == 1', // 1 is the code for HKWorkoutActivityType.Running
+        limit: 10000 // Large limit to ensure we get all workouts in the date range
       }) as unknown as QueryResponse<HKDistanceSample>;
+      
+      // Filter for running workouts only (workoutActivityType == 1)
+      if (response?.resultData) {
+        response.resultData = response.resultData.filter(sample => 
+          sample.workoutActivityType === 1
+        );
+      }
 
       console.log(`[HealthSync] Found ${response?.resultData?.length || 0} samples`);
 
@@ -270,19 +276,20 @@ export function useHealthSync(): UseHealthSyncReturn {
           
         if (error) {
           console.error(`[HealthSync] Error saving activity for ${activity.activity_date}:`, error);
+          continue;
         }
+      }
 
       // Update last sync time
       lastSyncRef.current = now;
       console.log('[HealthSync] Sync completed successfully');
-      
     } catch (error) {
       console.error('[HealthSync] Error syncing with HealthKit:', error);
       // Don't throw to prevent unhandled promise rejections
     }
   }, []);
 
-  const startHealthSync = useCallback((user: User, intervalMinutes = 60) => {
+  const startHealthSync = useCallback((user: User, intervalMinutes = 60): (() => void) => {
     // Clear any existing intervals
     cleanup();
 
