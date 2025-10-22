@@ -23,9 +23,10 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSHealthShareUsageDescription</key>
-	<string>We need access to your walking/running distance to track your workouts</string>
+	<string>We need access to your running workouts to track your distance and compete with friends</string>
 	<key>NSHealthShareUsageTypes</key>
 	<array>
+		<string>HKWorkoutTypeIdentifier</string>
 		<string>HKQuantityTypeIdentifierDistanceWalkingRunning</string>
 	</array>
 	<key>NSHealthUpdateUsageDescription</key>

@@ -77,16 +77,16 @@ export const useAppleHealth = () => {
       // Request authorization with proper options
       await CapacitorHealthkit.requestAuthorization({
         all: [],
-        read: ['distance'],
+        read: ['distance', 'workout'],
         write: []
       });
       
       // Check the new auth status
       const authStatus = await (CapacitorHealthkit as any).checkAuthStatus({
-        types: ['distance']
+        types: ['distance', 'workout']
       }) as AuthStatusResult;
       
-      const isAuthorized = authStatus.distance === 'authorized';
+      const isAuthorized = authStatus.distance === 'authorized' && authStatus.workout === 'authorized';
       setIsConnected(isAuthorized);
       
       if (isAuthorized) {

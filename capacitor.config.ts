@@ -12,7 +12,7 @@ const config: CapacitorConfig = {
     CapacitorHealthkit: {
       types: [
         {
-          read: ['distance'],
+          read: ['distance', 'workout'],
           write: []
         }
       ]

@@ -12,7 +12,7 @@ import { Preferences } from '@capacitor/preferences';
 import { HealthKitDebug } from '@/components/health/HealthKitDebug';
 import { DebugHealthSync } from '@/components/health/DebugHealthSync';
 
-const READ_PERMISSIONS = ['distance']; // short key your build recognizes
+const READ_PERMISSIONS = ['workout']; // Only request workout permissions
 const SHOW_DEBUG = false; // flip to true locally if you need verbose logs
 
 type HealthKitSample = {
