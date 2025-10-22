@@ -15,16 +15,17 @@ export default defineConfig({
     },
   },
   build: {
-    sourcemap: false,
+    target: 'esnext',
     minify: 'esbuild',
+    sourcemap: false,
     chunkSizeWarningLimit: 2000,
     reportCompressedSize: false,
     rollupOptions: {
       output: {
-        manualChunks: (id) => {
-          if (id.includes('node_modules')) {
-            return 'vendor';
-          }
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          vendor: ['@tanstack/react-query'],
+          ui: ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu']
         }
       },
     },
@@ -34,6 +35,7 @@ export default defineConfig({
       'react',
       'react-dom',
       'react-router-dom',
+      '@tanstack/react-query',
       '@radix-ui/react-dialog',
       '@radix-ui/react-dropdown-menu'
     ],
@@ -41,10 +43,7 @@ export default defineConfig({
       target: 'es2020',
     },
   },
-  css: {
-    devSourcemap: false,
-    modules: {
-      localsConvention: 'camelCaseOnly',
-    },
+  esbuild: {
+    target: 'es2020',
   },
 });
