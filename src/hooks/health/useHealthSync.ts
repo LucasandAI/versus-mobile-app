@@ -191,7 +191,9 @@ export function useHealthSync(): UseHealthSyncReturn {
       
       console.log('[HealthSync] Querying data from:', lastSync.toISOString());
       
-      // Query HealthKit for running workouts
+      console.log('[HealthSync] Requesting workouts from HealthKit...');
+      
+      // Query HealthKit for all workouts (we'll filter for running workouts after)
       const response = await CapacitorHealthkit.queryHKitSampleType({
         sampleName: SampleNames.WORKOUT_TYPE,
         startDate: lastSync.toISOString(),
@@ -199,11 +201,20 @@ export function useHealthSync(): UseHealthSyncReturn {
         limit: 10000 // Large limit to ensure we get all workouts in the date range
       }) as unknown as QueryResponse<HKDistanceSample>;
       
-      // Filter for running workouts only (workoutActivityType == 1)
+      // Filter for running workouts only (workoutActivityType == 1 for running)
       if (response?.resultData) {
-        response.resultData = response.resultData.filter(sample => 
-          sample.workoutActivityType === 1
-        );
+        const originalCount = response.resultData.length;
+        response.resultData = response.resultData.filter(sample => {
+          const isRunning = sample.workoutActivityType === 1;
+          if (!isRunning && sample.workoutActivityType) {
+            console.log(`[HealthSync] Filtered out non-running workout type: ${sample.workoutActivityType}`);
+          }
+          return isRunning;
+        });
+        
+        if (originalCount > 0) {
+          console.log(`[HealthSync] Found ${response.resultData.length} running workouts out of ${originalCount} total workouts`);
+        }
       }
 
       console.log(`[HealthSync] Found ${response?.resultData?.length || 0} samples`);
