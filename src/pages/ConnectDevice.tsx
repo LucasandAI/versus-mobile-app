@@ -103,29 +103,6 @@ const ConnectDevice: React.FC = () => {
     }
   }, [currentUser?.id]);
 
-  // Write aggregated per-day JSON and total_m (one row per user)
-  const persistAgg = useCallback(async (perDayMeters: Record<string, number>, total_m: number) => {
-    try {
-      if (!currentUser?.id) return;
-      // Trim to last 30 days to keep payload small
-      const keys = Object.keys(perDayMeters).sort().slice(-30);
-      const per_day: Record<string, number> = {};
-      for (const k of keys) per_day[k] = Math.round(perDayMeters[k] ?? 0);
-
-      await safeSupabase
-        .from('user_activity_agg')
-        .upsert({
-          user_id: currentUser.id,
-          per_day,
-          total_m: Math.round(total_m),
-          last_updated: new Date().toISOString(),
-        })
-        .eq('user_id', currentUser.id);
-    } catch (e) {
-      console.warn('[HK] Failed to persist user_activity_agg:', e);
-    }
-  }, [currentUser?.id]);
-
   // Compute and upsert total match contributions per active match for user's clubs
   const persistMatchContributions = useCallback(async () => {
     try {
@@ -189,14 +166,71 @@ const ConnectDevice: React.FC = () => {
       }
 
       if (rows.length) {
-        await safeSupabase
+        // First, get existing contributions for these matches
+        const { data: existingContributions, error: fetchError } = await safeSupabase
           .from('match_contributions')
-          .upsert(rows, { onConflict: 'match_id,user_id' });
+          .select('match_id, user_id, distance_meters')
+          .in('match_id', rows.map(r => r.match_id))
+          .eq('user_id', currentUser.id);
+
+        if (!fetchError) {
+          // Create a map of existing contributions
+          const existingMap = new Map(
+            (existingContributions || []).map(ec => 
+              [`${ec.match_id}_${ec.user_id}`, ec.distance_meters]
+            )
+          );
+
+          // Only update rows where the distance has changed
+          const rowsToUpdate = rows.filter(row => {
+            const existingDistance = existingMap.get(`${row.match_id}_${row.user_id}`);
+            return existingDistance === undefined || existingDistance !== row.distance_meters;
+          });
+
+          if (rowsToUpdate.length > 0) {
+            await safeSupabase
+              .from('match_contributions')
+              .upsert(rowsToUpdate, { onConflict: 'match_id,user_id' });
+          }
+        } else {
+          // Fallback to original behavior if we can't fetch existing
+          console.warn('Failed to fetch existing match contributions:', fetchError);
+          await safeSupabase
+            .from('match_contributions')
+            .upsert(rows, { onConflict: 'match_id,user_id' });
+        }
       }
     } catch (e) {
       console.warn('[HK] Failed to persist match contributions:', e);
     }
   }, [currentUser?.id]);
+
+  // Write aggregated per-day JSON and total_m (one row per user)
+  const persistAgg = useCallback(async (perDayMeters: Record<string, number>, total_m: number) => {
+    try {
+      if (!currentUser?.id) return;
+      // Trim to last 30 days to keep payload small
+      const keys = Object.keys(perDayMeters).sort().slice(-30);
+      const per_day: Record<string, number> = {};
+      for (const k of keys) per_day[k] = Math.round(perDayMeters[k] ?? 0);
+
+      await safeSupabase
+        .from('user_activity_agg')
+        .upsert({
+          user_id: currentUser.id,
+          per_day,
+          total_m: Math.round(total_m),
+          last_updated: new Date().toISOString(),
+        })
+        .eq('user_id', currentUser.id);
+      
+      // After updating user activities, update match contributions
+      await persistMatchContributions();
+    } catch (e) {
+      console.warn('[HK] Failed to persist user_activity_agg:', e);
+    }
+  }, [currentUser?.id, persistMatchContributions]);
+
   const sumMeters = (samples: HealthKitSample[]) => 
     samples.reduce((acc, s) => {
       const raw = Number((s as any).value ?? (s as any).quantity ?? 0);
