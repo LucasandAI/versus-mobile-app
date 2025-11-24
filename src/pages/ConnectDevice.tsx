@@ -154,18 +154,24 @@ const ConnectDevice: React.FC = () => {
       const rows: Array<{ match_id: string; user_id: string; club_id: string; contribution_date: string; distance_meters: number; }> = [];
 
       for (const m of matches) {
+        const currentDate = new Date();
+        const todayString = currentDate.toISOString().slice(0, 10);
+        
         const start = new Date(m.start_date);
-        const end = new Date(m.end_date ?? today);
-        const windowEnd = end > today ? today : end;
+        const end = m.end_date ? new Date(m.end_date) : currentDate;
+        const windowEnd = end > currentDate ? currentDate : end;
 
-        const startDay = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())).toISOString().slice(0,10);
-        const endDay = new Date(Date.UTC(windowEnd.getUTCFullYear(), windowEnd.getUTCMonth(), windowEnd.getUTCDate())).toISOString().slice(0,10);
+        const startDay = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())).toISOString().slice(0, 10);
+        const endDay = new Date(Date.UTC(windowEnd.getUTCFullYear(), windowEnd.getUTCMonth(), windowEnd.getUTCDate())).toISOString().slice(0, 10);
+        
+        // If match starts today, include all of today's activities regardless of match start time
+        const useActivityDate = startDay === todayString ? todayString : startDay;
 
         const { data: acts, error: actErr } = await safeSupabase
           .from('user_activities')
           .select('distance_meters, activity_date')
           .eq('user_id', currentUser.id)
-          .gte('activity_date', startDay)
+          .gte('activity_date', useActivityDate)
           .lte('activity_date', endDay);
         if (actErr) throw actErr;
 
