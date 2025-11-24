@@ -201,24 +201,86 @@ export function useHealthSync(): UseHealthSyncReturn {
       
       console.log('[HealthSync] Requesting workouts from HealthKit...');
       
-      // Query HealthKit for all workouts (we'll filter for running workouts after)
-      const response = await CapacitorHealthkit.queryHKitSampleType({
-        sampleName: SampleNames.WORKOUT_TYPE,
-        startDate: lastSync.toISOString(),
-        endDate: now.toISOString(),
-        limit: 10000 // Large limit to ensure we get all workouts in the date range
-      }) as unknown as QueryResponse<HKDistanceSample>;
+      // Query HealthKit for both workouts and distance data
+      const [workoutResponse, distanceResponse] = await Promise.all([
+        // Get running workouts
+        CapacitorHealthkit.queryHKitSampleType({
+          sampleName: SampleNames.WORKOUT_TYPE,
+          startDate: lastSync.toISOString(),
+          endDate: now.toISOString(),
+          limit: 10000
+        }) as unknown as QueryResponse<HKDistanceSample>,
+        
+        // Get all walking/running distance data (no unit parameter as it's not in the type)
+        CapacitorHealthkit.queryHKitSampleType({
+          sampleName: SampleNames.DISTANCE_WALKING_RUNNING,
+          startDate: lastSync.toISOString(),
+          endDate: now.toISOString(),
+          limit: 10000
+        }) as unknown as QueryResponse<HKDistanceSample>
+      ]);
+
+      // Combine and process both data sources
+      const response = {
+        resultData: [
+          ...(workoutResponse?.resultData || []),
+          ...(distanceResponse?.resultData || [])
+        ],
+        countReturn: (workoutResponse?.countReturn || 0) + (distanceResponse?.countReturn || 0)
+      };
       
-      // Filter for running workouts only (workoutActivityType == 1 for running)
+      // Process and combine the data
       if (response?.resultData) {
         const originalCount = response.resultData.length;
-        response.resultData = response.resultData.filter(sample => {
-          const isRunning = sample.workoutActivityType === 1;
-          if (!isRunning && sample.workoutActivityType) {
-            console.log(`[HealthSync] Filtered out non-running workout type: ${sample.workoutActivityType}`);
+        
+        // Log the first few samples for debugging
+        console.log('[HealthSync] Sample data from HealthKit:', 
+          response.resultData.slice(0, 3).map(d => ({
+            startDate: d.startDate,
+            value: d.value,
+            unit: d.unitName,
+            type: d.workoutActivityType ? 'workout' : 'distance'
+          }))
+        );
+        
+        // Convert all distances to meters and group by date
+        const dailyTotals = new Map<string, number>();
+        
+        for (const sample of response.resultData) {
+          try {
+            const startDate = new Date(sample.startDate);
+            if (isNaN(startDate.getTime())) {
+              console.warn('[HealthSync] Invalid date for sample:', sample);
+              continue;
+            }
+            
+            const dateKey = toLocalDateString(startDate);
+            const distanceMeters = toMeters(sample.value, sample.unitName);
+            
+            dailyTotals.set(
+              dateKey,
+              (dailyTotals.get(dateKey) || 0) + distanceMeters
+            );
+          } catch (error) {
+            console.error('[HealthSync] Error processing sample:', error, sample);
           }
-          return isRunning;
-        });
+        }
+        
+        console.log('[HealthSync] Processed daily distances (m):', Object.fromEntries(dailyTotals));
+        
+        // Convert back to the expected format for the rest of the function
+        response.resultData = Array.from(dailyTotals.entries()).map(([date, value]) => ({
+          uuid: `processed-${date}`,
+          value,
+          unitName: 'm',
+          startDate: new Date(date).toISOString(),
+          endDate: new Date(new Date(date).setHours(23, 59, 59, 999)).toISOString(),
+          source: 'versus',
+          sourceBundleId: 'com.versus.app',
+          device: null,
+          // Add workoutActivityType to ensure compatibility with existing code
+          workoutActivityType: 1
+        }));
         
         if (originalCount > 0) {
           console.log(`[HealthSync] Found ${response.resultData.length} running workouts out of ${originalCount} total workouts`);

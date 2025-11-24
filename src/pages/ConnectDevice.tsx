@@ -688,10 +688,13 @@ const ConnectDevice: React.FC = () => {
       await CapacitorHealthkit.isAvailable();
 
       const authOptions = { 
-        read: READ_PERMISSIONS, 
+        read: ['workout', 'distance'], 
         write: [], 
-        all: READ_PERMISSIONS 
+        all: ['workout', 'distance']
       };
+      
+      // Log the auth options for debugging
+      console.log('HK auth payload:', authOptions);
       
       console.log('HK auth payload:', authOptions);
       await CapacitorHealthkit.requestAuthorization(authOptions);
