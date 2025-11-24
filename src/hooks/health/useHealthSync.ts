@@ -146,7 +146,9 @@ interface UseHealthSyncReturn {
   cleanup: () => void;
 }
 
-export function useHealthSync(): UseHealthSyncReturn {
+type PersistAggFunction = (perDayMeters: Record<string, number>, total_m: number) => Promise<void>;
+
+export function useHealthSync(persistAgg: PersistAggFunction): UseHealthSyncReturn {
   const lastSyncRef = useRef<Date | null>(null);
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const initialSyncRef = useRef<NodeJS.Timeout | null>(null);
@@ -243,12 +245,18 @@ export function useHealthSync(): UseHealthSyncReturn {
           }))
         );
         
-        // Convert all distances to meters and group by date
+        // Process the data
         const dailyTotals = new Map<string, number>();
+        let sampleCount = 0;
+        let filteredCount = 0;
+        
+        console.log(`[HealthSync] Processing ${response.resultData.length} samples...`);
         
         for (const sample of response.resultData) {
           try {
+            sampleCount++;
             const startDate = new Date(sample.startDate);
+            
             if (isNaN(startDate.getTime())) {
               console.warn('[HealthSync] Invalid date for sample:', sample);
               continue;
@@ -256,6 +264,23 @@ export function useHealthSync(): UseHealthSyncReturn {
             
             const dateKey = toLocalDateString(startDate);
             const distanceMeters = toMeters(sample.value, sample.unitName);
+            
+            // Skip invalid or negative distances
+            if (isNaN(distanceMeters) || distanceMeters <= 0) {
+              filteredCount++;
+              continue;
+            }
+            
+            // Log sample details for debugging
+            if (sampleCount <= 5) { // Only log first few samples to avoid flooding
+              console.log(`[HealthSync] Sample ${sampleCount}:`, {
+                date: dateKey,
+                value: sample.value,
+                unit: sample.unitName,
+                meters: distanceMeters,
+                type: sample.workoutActivityType ? 'workout' : 'distance'
+              });
+            }
             
             dailyTotals.set(
               dateKey,
@@ -266,7 +291,31 @@ export function useHealthSync(): UseHealthSyncReturn {
           }
         }
         
-        console.log('[HealthSync] Processed daily distances (m):', Object.fromEntries(dailyTotals));
+        // Log processing summary
+        console.log(`[HealthSync] Processed ${sampleCount} samples (${filteredCount} filtered out)`);
+        
+        // Convert to the format expected by persistAgg and round to 2 decimal places
+        const perDayMeters = Object.fromEntries(
+          Array.from(dailyTotals.entries()).map(([date, meters]) => [
+            date,
+            Math.round(meters * 100) / 100 // Round to 2 decimal places
+          ])
+        );
+        
+        const totalMeters = Array.from(dailyTotals.values())
+          .reduce((sum, dist) => sum + dist, 0);
+        
+        console.log('[HealthSync] Daily distances (m):', perDayMeters);
+        console.log(`[HealthSync] Total distance: ${totalMeters.toFixed(2)}m`);
+        
+        // Save to Supabase
+        if (Object.keys(perDayMeters).length > 0) {
+          console.log('[HealthSync] Saving to Supabase...');
+await persistAgg(perDayMeters, totalMeters);
+          console.log('[HealthSync] Data saved to Supabase');
+        } else {
+          console.log('[HealthSync] No valid data to save');
+        }
         
         // Convert back to the expected format for the rest of the function
         response.resultData = Array.from(dailyTotals.entries()).map(([date, value]) => ({

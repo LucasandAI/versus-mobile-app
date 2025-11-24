@@ -39,7 +39,6 @@ const ConnectDevice: React.FC = () => {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const healthSync = useHealthSync();
   const WRITE_HEALTH_TO_DB = true;
 
   // ---------- utils ----------
@@ -231,12 +230,17 @@ const ConnectDevice: React.FC = () => {
     }
   }, [currentUser?.id, persistMatchContributions]);
 
+  const healthSync = useHealthSync(persistAgg);
+
   const sumMeters = (samples: HealthKitSample[]) => 
     samples.reduce((acc, s) => {
       const raw = Number((s as any).value ?? (s as any).quantity ?? 0);
       const unit = (s as any).unitName || (s as any).unit || 'meter';
       // Normalize to meters
-      const meters = unit === 'meter' || unit === 'm' ? raw
+      const meters = unit === 'meter' || unit === 'm'
+        ? raw
+        : unit === 'kilometer' || unit === 'km'
+        ? raw * 1000
         : unit === 'kilometer' || unit === 'km' ? raw * 1000
         : raw; // fallback assume meters
       return acc + meters;
