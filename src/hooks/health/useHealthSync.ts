@@ -223,7 +223,7 @@ export function useHealthSync(persistAgg: PersistAggFunction): UseHealthSyncRetu
       ]);
 
       // Combine and process both data sources
-      const response = {
+      let response = {
         resultData: [
           ...(workoutResponse?.resultData || []),
           ...(distanceResponse?.resultData || [])
@@ -324,9 +324,9 @@ await persistAgg(perDayMeters, totalMeters);
           unitName: 'm',
           startDate: new Date(date).toISOString(),
           endDate: new Date(new Date(date).setHours(23, 59, 59, 999)).toISOString(),
-          source: 'versus',
-          sourceBundleId: 'com.versus.app',
           device: null,
+          source: 'versus-processed',
+          sourceBundleId: 'com.versus.app',
           // Add workoutActivityType to ensure compatibility with existing code
           workoutActivityType: 1
         }));

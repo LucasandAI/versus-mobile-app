@@ -208,8 +208,8 @@ const ConnectDevice: React.FC = () => {
   const persistAgg = useCallback(async (perDayMeters: Record<string, number>, total_m: number) => {
     try {
       if (!currentUser?.id) return;
-      // Trim to last 30 days to keep payload small
-      const keys = Object.keys(perDayMeters).sort().slice(-30);
+      // Trim to last 7 days for the aggregate view
+      const keys = Object.keys(perDayMeters).sort().slice(-7);
       const per_day: Record<string, number> = {};
       for (const k of keys) per_day[k] = Math.round(perDayMeters[k] ?? 0);
 
