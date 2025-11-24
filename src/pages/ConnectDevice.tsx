@@ -400,145 +400,18 @@ const ConnectDevice: React.FC = () => {
     }
   }, []);
 
-  // Process and store last 7 days of walking/running data
+  // This function now triggers a forced sync of the last 30 days of data.
   const persistLast7Days = useCallback(async () => {
     if (!currentUser?.id) return;
-    
     try {
-      // Get dates in local time
-      const today = new Date();
-      today.setHours(23, 59, 59, 999); // End of today
-      const start7 = new Date(today);
-      start7.setDate(today.getDate() - 6); // 7 days total (today + 6 days)
-      start7.setHours(0, 0, 0, 0); // Start of day
-      
-      // Format dates for database queries (YYYY-MM-DD)
-      const formatDbDate = (d: Date) => {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const dd = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${dd}`;
-      };
-      
-      // Helper to get local date string from a date
-      const getLocalDateStr = (date: Date) => {
-        return formatDbDate(new Date(date.getTime() - (date.getTimezoneOffset() * 60000)));
-      };
-      
-      // Get fresh data from HealthKit with proper timezone handling
-      const wr = await CapacitorHealthkit.queryHKitSampleType({
-        sampleName: SampleNames.DISTANCE_WALKING_RUNNING,
-        startDate: start7.toISOString(),
-        endDate: today.toISOString(),
-        limit: 100000,
-      });
-      
-      const wrSamples = Array.isArray(wr?.resultData) ? (wr.resultData as HealthKitSample[]) : [];
-      
-      // Get cycling data to exclude from walking/running
-      const cy = await CapacitorHealthkit.queryHKitSampleType({
-        sampleName: (SampleNames as any).DISTANCE_CYCLING ?? 'DISTANCE_CYCLING',
-        startDate: start7.toISOString(),
-        endDate: today.toISOString(),
-        limit: 100000,
-      }).catch(() => ({ resultData: [] as any[] }));
-      
-      const cySamples = Array.isArray(cy?.resultData) ? (cy.resultData as HealthKitSample[]) : [];
-      
-      // Process samples by day
-      const dailyTotals: Record<string, number> = {};
-      
-      // Initialize all 7 days with 0
-      for (let d = new Date(start7); d <= today; d.setDate(d.getDate() + 1)) {
-        dailyTotals[formatDbDate(new Date(d))] = 0;
-      }
-      
-      // Process walking/running samples
-      for (const sample of wrSamples) {
-        const sampleDate = new Date(sample.startDate);
-        const localDate = getLocalDateStr(sampleDate);
-        const distance = Number(sample.value ?? sample.quantity ?? 0);
-        
-        // Only add if it's within our 7-day window
-        if (dailyTotals.hasOwnProperty(localDate)) {
-          dailyTotals[localDate] += distance;
-        }
-      }
-      
-      // Process cycling samples to exclude from walking/running
-      for (const sample of cySamples) {
-        const sampleDate = new Date(sample.startDate);
-        const localDate = getLocalDateStr(sampleDate);
-        const distance = Number(sample.value ?? sample.quantity ?? 0);
-        
-        // Subtract cycling distance from walking/running for the same day
-        if (dailyTotals.hasOwnProperty(localDate)) {
-          dailyTotals[localDate] = Math.max(0, dailyTotals[localDate] - distance);
-        }
-      }
-      
-      // Get existing activities to avoid unnecessary updates
-      const { data: existingActivities, error: fetchError } = await safeSupabase
-        .from('user_activities')
-        .select('*')
-        .eq('user_id', currentUser.id)
-        .gte('activity_date', formatDbDate(start7))
-        .lte('activity_date', formatDbDate(today));
-      
-      if (fetchError) throw fetchError;
-      
-      // Create a map of existing activities by date
-      const existingByDate = new Map<string, any>();
-      existingActivities?.forEach(activity => {
-        existingByDate.set(activity.activity_date, activity);
-      });
-      
-      // Update or insert daily totals
-      const upsertPromises = Object.entries(dailyTotals).map(async ([date, distance]) => {
-        const roundedDistance = Math.round(distance);
-        const existing = existingByDate.get(date);
-        
-        // Only update if the distance has changed significantly (more than 10%)
-        if (existing) {
-          const currentDistance = existing.distance_meters || 0;
-          const isSignificantChange = Math.abs(currentDistance - roundedDistance) > (currentDistance * 0.1);
-          
-          if (isSignificantChange) {
-            return safeSupabase
-              .from('user_activities')
-              .update({
-                distance_meters: roundedDistance,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', existing.id);
-          }
-          return null;
-        } else {
-          // Insert new record
-          return safeSupabase
-            .from('user_activities')
-            .insert({
-              user_id: currentUser.id,
-              activity_date: date,
-              distance_meters: roundedDistance,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            });
-        }
-      });
-      
-      // Wait for all upserts to complete
-      await Promise.all(upsertPromises);
-      
-      // Update the aggregated data
-      const total7Days = Object.values(dailyTotals).reduce((sum, dist) => sum + dist, 0);
-      await persistAgg(dailyTotals, total7Days);
-      
+      console.log('[HK] Forcing a sync of the last 30 days of HealthKit data...');
+      await healthSync.syncDeltas(currentUser, true); // true for forceSync
+      console.log('[HK] Force sync completed.');
     } catch (error) {
-      console.error('[HK] Error in persistLast7Days:', error);
+      console.error('[HK] Error during forced sync:', error);
       throw error; // Re-throw to be caught by the caller
     }
-  }, [currentUser?.id, persistAgg]);
+  }, [currentUser, healthSync]);
 
   // Helper function to convert distance to meters
   const metersOf = (s: HealthKitSample): number => {
