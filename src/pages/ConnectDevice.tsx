@@ -205,7 +205,7 @@ const ConnectDevice: React.FC = () => {
   }, [currentUser?.id]);
 
   // Write aggregated per-day JSON and total_m (one row per user)
-  const persistAgg = useCallback(async (perDayMeters: Record<string, number>, total_m: number) => {
+  const persistAgg = useCallback(async (perDayMeters: Record<string, number>) => {
     try {
       if (!currentUser?.id) return;
       // Trim to last 7 days for the aggregate view
@@ -213,12 +213,15 @@ const ConnectDevice: React.FC = () => {
       const per_day: Record<string, number> = {};
       for (const k of keys) per_day[k] = Math.round(perDayMeters[k] ?? 0);
 
+      // Recalculate total_m from the trimmed 7-day per_day data
+      const total_m_7_days = Object.values(per_day).reduce((sum, dist) => sum + dist, 0);
+
       await safeSupabase
         .from('user_activity_agg')
         .upsert({
           user_id: currentUser.id,
           per_day,
-          total_m: Math.round(total_m),
+          total_m: Math.round(total_m_7_days),
           last_updated: new Date().toISOString(),
         })
         .eq('user_id', currentUser.id);

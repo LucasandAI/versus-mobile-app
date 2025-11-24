@@ -146,7 +146,7 @@ interface UseHealthSyncReturn {
   cleanup: () => void;
 }
 
-type PersistAggFunction = (perDayMeters: Record<string, number>, total_m: number) => Promise<void>;
+type PersistAggFunction = (perDayMeters: Record<string, number>) => Promise<void>;
 
 export function useHealthSync(persistAgg: PersistAggFunction): UseHealthSyncReturn {
   const lastSyncRef = useRef<Date | null>(null);
@@ -311,7 +311,7 @@ export function useHealthSync(persistAgg: PersistAggFunction): UseHealthSyncRetu
         // Save to Supabase
         if (Object.keys(perDayMeters).length > 0) {
           console.log('[HealthSync] Saving to Supabase...');
-await persistAgg(perDayMeters, totalMeters);
+await persistAgg(perDayMeters);
           console.log('[HealthSync] Data saved to Supabase');
         } else {
           console.log('[HealthSync] No valid data to save');
