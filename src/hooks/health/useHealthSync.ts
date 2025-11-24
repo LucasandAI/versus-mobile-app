@@ -4,6 +4,14 @@ import { useCallback, useRef, useEffect } from 'react';
 import { safeSupabase } from '../../integrations/supabase/safeClient';
 import type { User } from '../../types';
 
+// Helper function to convert date to local YYYY-MM-DD string
+const toLocalDateString = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 // Type definitions for HealthKit responses
 interface HealthKitAuthResult {
   [key: string]: { read: string; write: string } | string;
@@ -236,7 +244,7 @@ export function useHealthSync(): UseHealthSyncReturn {
             return;
           }
           
-          const dateKey = startDate.toISOString().split('T')[0]; // YYYY-MM-DD
+          const dateKey = toLocalDateString(startDate); // Use local date for grouping
           const distanceMeters = toMeters(sample.value, sample.unitName);
           
           // Sum distances for the same date
